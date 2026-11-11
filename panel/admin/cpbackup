@@ -1,0 +1,75 @@
+#!/usr/local/cpanel/3rdparty/bin/perl
+use strict;
+use warnings;
+
+use base 'Cpanel::AdminBin::Script::Call';
+
+__PACKAGE__->run( alarm => 60 );
+
+sub LIST {
+    my ($self) = @_;
+    return _invoke( $self, 'list' );
+}
+
+sub LOG {
+    my ( $self, $id ) = @_;
+    return _invoke( $self, 'log', _id($id) );
+}
+
+sub RESTORE {
+    my ( $self, $id, $confirm ) = @_;
+    return _invoke( $self, 'restore', _id($id), _confirm($confirm) );
+}
+
+sub BACKUP {
+    my ($self) = @_;
+    return _invoke( $self, 'backup' );
+}
+
+sub ENTRIES {
+    my ( $self, $id ) = @_;
+    return _invoke( $self, 'entries', _id($id) );
+}
+
+sub PARTIAL {
+    my ($self) = @_;
+    return _invoke( $self, 'partial' );
+}
+
+sub DELETE {
+    my ( $self, $id ) = @_;
+    return _invoke( $self, 'delete', _id($id) );
+}
+
+sub _actions {
+    return qw(LIST LOG RESTORE BACKUP ENTRIES PARTIAL DELETE);
+}
+
+sub _invoke {
+    my ( $self, $action, @args ) = @_;
+    my $user = $self->get_caller_username() || CORE::die('oturum yok');
+    CORE::die('hesap geçersiz') if $user !~ /\A[a-z0-9_]{1,32}\z/;
+    my @command = ( '/usr/bin/python3', '/opt/cpbackup/engine/usercli.py', $action, $user, @args );
+    my $pid = open( my $pipe, '-|', @command );
+    CORE::die('yardımcı başlatılamadı') if !$pid;
+    local $/;
+    my $output = <$pipe>;
+    close($pipe);
+    my $code = $? >> 8;
+    CORE::die( $output || 'işlem tamamlanamadı' ) if $code;
+    return $output;
+}
+
+sub _id {
+    my ($value) = @_;
+    CORE::die('kimlik geçersiz') if !defined $value || $value !~ /\A[0-9]{1,12}\z/;
+    return $value;
+}
+
+sub _confirm {
+    my ($value) = @_;
+    CORE::die('onay geçersiz') if !defined $value || $value !~ /\A[a-z0-9_]{1,32}\z/;
+    return $value;
+}
+
+1;

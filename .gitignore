@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Çalışan sunucunun kayıtları ve anahtarı. Bunlar depoya girmez.
+data/
+logs/
+*.db
+secret.key
+
+# Arayüz bağımlılıkları. Kurulum ui/dist içindeki derlenmiş dosyaları kullanır.
+ui/node_modules/
+
+# Paket arşivi
+*.zip
