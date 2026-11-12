@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import os
 
-VERSION = "1.1.1"
+VERSION = "1.1.2"
 ROOT = "/opt/cpbackup"
 DATA_DIR = os.path.join(ROOT, "data")
 LOG_DIR = os.path.join(ROOT, "logs")

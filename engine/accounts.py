@@ -16,7 +16,8 @@ def whm_json(args):
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        universal_newlines=True,
+        encoding="utf-8",
+        errors="replace",
     )
     if proc.returncode != 0:
         reason = (proc.stderr or proc.stdout or "whmapi1 hatası").strip()

@@ -201,7 +201,7 @@ def _body():
         return {}
     if length > 1000000:
         raise ValueError("İstek çok büyük.")
-    raw = sys.stdin.read(length)
+    raw = sys.stdin.buffer.read(length).decode("utf-8", "replace")
     if not raw.strip():
         return {}
     try:

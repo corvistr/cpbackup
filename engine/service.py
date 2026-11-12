@@ -78,7 +78,7 @@ def log_line(message):
     if not os.path.isdir(os.path.dirname(LOG_FILE)):
         os.makedirs(os.path.dirname(LOG_FILE), 0o700)
     _trim(LOG_FILE, 5 * 1024 * 1024)
-    with open(LOG_FILE, "a") as handle:
+    with open(LOG_FILE, "a", encoding="utf-8", errors="replace") as handle:
         handle.write("%s %s\n" % (now_text(), message))
 
 
@@ -2072,7 +2072,8 @@ def _run_cmd(cmd):
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         stdin=subprocess.DEVNULL,
-        universal_newlines=True,
+        encoding="utf-8",
+        errors="replace",
         cwd="/root",
         env=env,
     )

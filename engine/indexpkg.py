@@ -17,7 +17,7 @@ def _rel(name):
 
 def list_members(path):
     mode = "r:gz" if path.endswith(".gz") else "r:"
-    with tarfile.open(path, mode) as archive:
+    with tarfile.open(path, mode, encoding="utf-8", errors="surrogateescape") as archive:
         for member in archive:
             yield member
 
@@ -51,7 +51,8 @@ def build_rows(path):
 def repack_skipping(path, skip_fn):
     temporary = path + ".repack"
     mode = "r:gz" if path.endswith(".gz") else "r:"
-    with tarfile.open(path, mode) as source, tarfile.open(temporary, "w:gz") as target:
+    with tarfile.open(path, mode, encoding="utf-8", errors="surrogateescape") as source, \
+            tarfile.open(temporary, "w:gz", encoding="utf-8", errors="surrogateescape") as target:
         for member in source:
             if skip_fn(member.name):
                 continue

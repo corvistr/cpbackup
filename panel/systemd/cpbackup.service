@@ -5,6 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+Environment=PYTHONUTF8=1 PYTHONIOENCODING=utf-8
 ExecStart=/usr/bin/python3 /opt/cpbackup/engine/worker.py --service
 Restart=always
 RestartSec=5

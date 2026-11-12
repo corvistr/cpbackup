@@ -61,7 +61,7 @@ def apply_selection(archive_path, account, selection):
         os.makedirs(root, 0o755)
     mode = "r:gz" if archive_path.endswith(".gz") else "r:"
     applied = []
-    with tarfile.open(archive_path, mode) as archive:
+    with tarfile.open(archive_path, mode, encoding="utf-8", errors="surrogateescape") as archive:
         members = archive.getmembers()
         for kind, path in wanted:
             if kind == "database" and not preview:

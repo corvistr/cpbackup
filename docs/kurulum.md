@@ -1,6 +1,6 @@
 # Kurulum kılavuzu
 
-Bu kılavuz cPBackup 1.1.1 paketini yeni bir cPanel/WHM sunucusuna kurar ve kurulu bir kopyayı günceller. Kullanım için [kullanim.md](kullanim.md) dosyasına bakın.
+Bu kılavuz cPBackup 1.1.2 paketini yeni bir cPanel/WHM sunucusuna kurar ve kurulu bir kopyayı günceller. Kullanım için [kullanim.md](kullanim.md) dosyasına bakın.
 
 ## 1. Kurulum öncesi
 

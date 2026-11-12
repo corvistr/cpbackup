@@ -52,7 +52,12 @@ def main():
     except Exception:
         _fail("İşlem tamamlanamadı.")
         return
-    sys.stdout.write(json.dumps(payload, ensure_ascii=False))
+    _write(payload)
+
+
+def _write(payload):
+    sys.stdout.buffer.write(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+    sys.stdout.buffer.flush()
 
 
 def _request_body(account):
@@ -88,7 +93,7 @@ def _own_backup(account, run_id):
 
 
 def _fail(message):
-    sys.stdout.write(json.dumps({"ok": False, "error": message}, ensure_ascii=False))
+    _write({"ok": False, "error": message})
     raise SystemExit(0)
 
 

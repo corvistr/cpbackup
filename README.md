@@ -1,8 +1,8 @@
 # cPBackup
 
-JetBackup alternative for cPanel and WHM. It backs up accounts, uploads them to FTP, S3, or cloud storage, and restores them from the panel. Version **1.1.1**.
+JetBackup alternative for cPanel and WHM. It backs up accounts, uploads them to FTP, S3, or cloud storage, and restores them from the panel. Version **1.1.2**.
 
-cPanel ve WHM sunucusunda hesap yedeği alan, hedefe yükleyen ve panelden geri yükleyen eklenti. Sürüm **1.1.1**.
+cPanel ve WHM sunucusunda hesap yedeği alan, hedefe yükleyen ve panelden geri yükleyen eklenti. Sürüm **1.1.2**.
 
 WHM yöneticisi görev ve hedef tanımlar. Müşteri cPanel içinden tam veya parça yedek alır, kendi elle aldığı yedeği silebilir ve izin varsa geri yükler. Paketler cPanel’in `pkgacct` ve `restorepkg` araçlarıyla üretilir. Varsayılan dosya sıkıştırılmış `tar.gz` arşividir.
 

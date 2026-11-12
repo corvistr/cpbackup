@@ -1,6 +1,6 @@
 # Kullanım kılavuzu
 
-cPBackup 1.1.1. Yönetici işleri WHM’deki **cPBackup** ekranındadır. Müşteri işleri cPanel’deki **cPBackup Yedekler** ekranındadır.
+cPBackup 1.1.2. Yönetici işleri WHM’deki **cPBackup** ekranındadır. Müşteri işleri cPanel’deki **cPBackup Yedekler** ekranındadır.
 
 ## WHM ekranları
 
