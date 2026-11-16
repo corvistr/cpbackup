@@ -68,6 +68,7 @@ export type BatchSummary = {
   uploaded: number
   failed: number
   skipped: number
+  cancelled: number
   queued: number
   running: number
   restored: number
@@ -187,6 +188,7 @@ export function statusLabel(status: string) {
     deleted: "Silindi",
     restored: "Geri yüklendi",
     skipped: "Atlandı",
+    cancelled: "Durduruldu",
   }
   return labels[status] || status
 }

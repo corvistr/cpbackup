@@ -9,7 +9,7 @@ export function StatusBadge({ status }: { status: string }) {
         ? "success"
         : status === "running"
           ? "default"
-          : status === "deleted" || status === "skipped"
+          : status === "deleted" || status === "skipped" || status === "cancelled"
             ? "outline"
             : "secondary"
   return <Badge variant={variant}>{statusLabel(status)}</Badge>

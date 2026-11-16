@@ -112,12 +112,17 @@ export function History({ onNotify }: { onNotify: (message: string, error?: bool
     }
   }
 
-  async function toggleStop(stop: boolean) {
-    if (selected === null) return
+  async function stopBatch() {
+    if (selected === null || !batch) return
     setBusy(true)
     try {
-      await api("batch.stop", { id: selected, stop })
-      onNotify(stop ? "Mevcut hesap bitince kuyruk duracak." : "Kuyruk sürecek.")
+      const result = await api<{ cancelled: number }>("batch.stop", { id: selected, stop: true })
+      const runningNote = batch.running > 0 ? " Süren hesap yüklenmeden kapatılıyor." : ""
+      onNotify(
+        result.cancelled
+          ? `${result.cancelled} bekleyen hesap iptal edildi. Diğer yedekler sürer.${runningNote}`
+          : `Bekleyen hesap yok. Diğer yedekler sürer.${runningNote}`,
+      )
       loadDetail()
     } catch (error) {
       onNotify(error instanceof Error ? error.message : "Durdurma kaydedilemedi", true)
@@ -169,17 +174,17 @@ export function History({ onNotify }: { onNotify: (message: string, error?: bool
                 }
               }}>Hatalıları yeniden dene</Button>
             ) : null}
-            {batch && (batch.queued + batch.running) > 0 ? (
-              <Button
-                variant={batch.stop_requested ? "default" : "outline"}
-                size="sm"
-                disabled={busy}
-                onClick={() => toggleStop(!batch.stop_requested)}
-              >
-                {batch.stop_requested ? "Sürdür" : "Durdur"}
+            {batch && !batch.stop_requested && (batch.queued + batch.running) > 0 ? (
+              <Button variant="outline" size="sm" disabled={busy} onClick={stopBatch}>
+                Durdur
               </Button>
             ) : null}
-            {batch?.stop_requested ? <span className="text-xs text-muted-foreground">Mevcut hesap bitince kuyruk bekler.</span> : null}
+            {batch?.stop_requested ? (
+              <span className="text-xs text-muted-foreground">
+                Bu çalıştırma kapatıldı. Bekleyenler iptal edildi; diğer yedekler sürer.
+                {batch.running > 0 ? " Süren hesap yüklenmeden kapatılıyor." : ""}
+              </span>
+            ) : null}
             {batch ? <BatchCounts batch={batch} /> : null}
           </div>
         </div>

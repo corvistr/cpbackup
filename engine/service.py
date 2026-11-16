@@ -7,6 +7,7 @@ import hmac
 import json
 import os
 import shutil
+import signal
 import socket
 import subprocess
 import time
@@ -832,22 +833,20 @@ def enqueue_job(job_id):
 
 def set_batch_stop(batch_id, stop):
     batch_id = _as_int(batch_id, "Kimlik", 1, 10 ** 9)
-    flag = 1 if stop else 0
+    if not stop:
+        raise ValueError("Durdurulan çalıştırma yeniden açılmaz.")
     conn = connect()
     try:
         found = conn.execute("SELECT id FROM batches WHERE id=?", (batch_id,)).fetchone()
         if found is None:
             raise ValueError("Çalıştırma bulunamadı.")
-        conn.execute("UPDATE batches SET stop_requested=? WHERE id=?", (flag, batch_id))
+        conn.execute("UPDATE batches SET stop_requested=1 WHERE id=?", (batch_id,))
+        cancelled = _cancel_waiting(conn, batch_id)
         conn.commit()
     finally:
         conn.close()
-    if flag:
-        _announced_stop.discard(batch_id)
-        log_line("çalıştırma durdurma istendi batch=%s" % batch_id)
-    else:
-        log_line("çalıştırma sürdürülecek batch=%s" % batch_id)
-    return {"ok": True, "stop_requested": bool(flag)}
+    log_line("çalıştırma kapatıldı batch=%s iptal=%s" % (batch_id, cancelled))
+    return {"ok": True, "stop_requested": True, "cancelled": cancelled}
 
 
 def list_runs(limit=100, offset=0):
@@ -915,6 +914,7 @@ def _query_batches(conn, limit, offset, query, batch_id=None):
                   COALESCE(SUM(CASE WHEN r.status='uploaded' THEN 1 ELSE 0 END), 0) AS uploaded,
                   COALESCE(SUM(CASE WHEN r.status='failed' THEN 1 ELSE 0 END), 0) AS failed,
                   COALESCE(SUM(CASE WHEN r.status='skipped' THEN 1 ELSE 0 END), 0) AS skipped,
+                  COALESCE(SUM(CASE WHEN r.status='cancelled' THEN 1 ELSE 0 END), 0) AS cancelled,
                   COALESCE(SUM(CASE WHEN r.status IN ('queued','packaged') THEN 1 ELSE 0 END), 0) AS queued,
                   COALESCE(SUM(CASE WHEN r.status IN ('running','packaging','uploading') THEN 1 ELSE 0 END), 0) AS running,
                   COALESCE(SUM(CASE WHEN r.status='restored' THEN 1 ELSE 0 END), 0) AS restored,
@@ -944,6 +944,7 @@ def _batch_public(row):
         "uploaded": int(row["uploaded"] or 0),
         "failed": int(row["failed"] or 0),
         "skipped": int(row["skipped"] or 0),
+        "cancelled": int(row["cancelled"] or 0),
         "queued": int(row["queued"] or 0),
         "running": int(row["running"] or 0),
         "restored": int(row["restored"] or 0),
@@ -1440,6 +1441,7 @@ def _own_summary(row):
         "failed": _public_error(row["error"]) or "İşlem tamamlanamadı.",
         "deleted": "Bu yedek artık kullanılamaz.",
         "skipped": "Askıdaki hesap atlandı.",
+        "cancelled": "Durduruldu.",
     }
     return labels.get(row["status"], "Durum bilinmiyor.")
 
@@ -1486,6 +1488,7 @@ def run_worker(service=False):
             ready.close()
         _recover_stale()
         while True:
+            _close_stopped_queues()
             _drop_suspended_queued()
             _enqueue_due_jobs()
             hold = _FtpHold()
@@ -1556,9 +1559,16 @@ def _enqueue_accounts(conn, job):
     pending = []
     for item in chosen:
         existing = conn.execute(
-            """SELECT id FROM runs
-               WHERE job_id=? AND account=? AND kind='backup'
-                 AND status IN ('queued','running','packaging','packaged','uploading')""",
+            """SELECT r.id FROM runs r
+               LEFT JOIN batches b ON b.id=r.batch_id
+               WHERE r.job_id=? AND r.account=? AND r.kind='backup'
+                 AND (
+                   r.status IN ('running','packaging','uploading')
+                   OR (
+                     r.status IN ('queued','packaged')
+                     AND COALESCE(b.stop_requested, 0)=0
+                   )
+                 )""",
             (job["id"], item["user"]),
         ).fetchone()
         if existing:
@@ -1666,23 +1676,23 @@ def _process_one(hold):
     conn = connect()
     try:
         row = conn.execute(
-            "SELECT * FROM runs WHERE status='queued' ORDER BY id ASC LIMIT 1"
+            """SELECT r.* FROM runs r
+               LEFT JOIN batches b ON b.id=r.batch_id
+               WHERE r.status='queued' AND COALESCE(b.stop_requested, 0)=0
+               ORDER BY r.id ASC LIMIT 1"""
         ).fetchone()
-        if row is not None and _batch_stopped(conn, row["batch_id"]):
-            _note_stop(row["batch_id"])
-            return False
         resume = False
         if row is None:
             cutoff = (now_dt() - datetime.timedelta(seconds=120)).strftime("%Y-%m-%d %H:%M:%S")
             row = conn.execute(
-                """SELECT * FROM runs WHERE status='packaged'
-                   AND (finished_at IS NULL OR finished_at<=?)
-                   ORDER BY id ASC LIMIT 1""",
+                """SELECT r.* FROM runs r
+                   LEFT JOIN batches b ON b.id=r.batch_id
+                   WHERE r.status='packaged'
+                     AND COALESCE(b.stop_requested, 0)=0
+                     AND (r.finished_at IS NULL OR r.finished_at<=?)
+                   ORDER BY r.id ASC LIMIT 1""",
                 (cutoff,),
             ).fetchone()
-            if row is not None and _batch_stopped(conn, row["batch_id"]):
-                _note_stop(row["batch_id"])
-                return False
             resume = row is not None
         if row is None:
             return False
@@ -1731,6 +1741,7 @@ def _perform_backup(run_id, hold):
         _finish(run_id, "failed", "Görev veya FTP hedefi bulunamadı.")
         return
     account = run["account"]
+    batch_id = run["batch_id"] if "batch_id" in run.keys() else None
     if not _valid_user(account):
         _finish(run_id, "failed", "Hesap adı geçersiz.")
         return
@@ -1782,8 +1793,11 @@ def _perform_backup(run_id, hold):
             else:
                 cmd.extend(pkgacct_skip_args(scope))
             cmd.extend([account, workdir])
-            code, output = _run_cmd(cmd)
+            code, output = _run_cmd(cmd, abort_batch=batch_id)
             _note(run_id, output.strip()[-4000:] if output.strip() else "pkgacct çıktı üretmedi.")
+            if code == 75 or _batch_id_stopped(batch_id):
+                _cancel_active(run_id, "Paketleme durduruldu. Arşiv yüklenmedi.")
+                return
             if code != 0:
                 _finish(run_id, "failed", "Hesap paketi oluşturulamadı (kod %s)." % code)
                 return
@@ -1800,11 +1814,20 @@ def _perform_backup(run_id, hold):
             local = os.path.join(workdir, remote_name)
             os.rename(package, local)
             _remember_package(run_id, local)
+            if _batch_id_stopped(batch_id):
+                _cancel_active(run_id, "Paketleme bitti, yükleme öncesi durduruldu.")
+                return
         remote_name = os.path.basename(local)
         scope = _scope_from_run(job, run)
+        if _batch_id_stopped(batch_id):
+            _cancel_active(run_id, "Yükleme öncesi durduruldu.")
+            return
         if needs_repack(scope):
             _note(run_id, "Seçilmeyen parçalar paketten çıkarılıyor.")
             repack_skipping(local, lambda name, scope=scope: member_skipped(name, scope))
+            if _batch_id_stopped(batch_id):
+                _cancel_active(run_id, "Yükleme öncesi durduruldu.")
+                return
         size = os.path.getsize(local)
         manual = _run_manual(run)
         _set_stage(run_id, "uploading")
@@ -1833,7 +1856,10 @@ def _perform_backup(run_id, hold):
         _finish(run_id, "uploaded", None, remote_path=remote_path, size_bytes=size)
         log_line("yedek tamam id=%s hesap=%s boyut=%s" % (run_id, account, size))
     except Exception as exc:
-        if local and os.path.isfile(local) and os.path.getsize(local) > 128:
+        if _batch_id_stopped(batch_id):
+            _cancel_active(run_id, "Çalıştırma durduruldu.")
+            log_line("yedek durduruldu id=%s hesap=%s" % (run_id, account))
+        elif local and os.path.isfile(local) and os.path.getsize(local) > 128:
             keep = True
             _remember_package(run_id, local)
             _park_upload(run_id, str(exc))
@@ -1871,8 +1897,12 @@ def _perform_restore(run_id, hold):
             cmd.append("--force")
         cmd.append(local_path)
         _note(run_id, "restorepkg başlatıldı.")
-        code, output = _run_cmd(cmd)
+        batch_id = run["batch_id"] if "batch_id" in run.keys() else None
+        code, output = _run_cmd(cmd, abort_batch=batch_id)
         _note(run_id, output.strip()[-5000:] if output.strip() else "restorepkg çıktı üretmedi.")
+        if code == 75 or _batch_id_stopped(batch_id):
+            _cancel_active(run_id, "Geri yükleme durduruldu.")
+            return
         if code != 0:
             _finish(run_id, "failed", "Geri yükleme tamamlanamadı (kod %s)." % code)
             _notify("cPBackup geri yükleme başarısız: %s" % run["account"], "çıkış kodu %s" % code)
@@ -2062,22 +2092,67 @@ def _package_from_output(output, workdir, account):
     return None
 
 
-def _run_cmd(cmd):
+def _run_cmd(cmd, abort_batch=None):
     env = os.environ.copy()
     env["PATH"] = "/usr/local/cpanel/bin:/usr/local/cpanel/scripts:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin"
     env["HOME"] = "/root"
     env["LANG"] = "C"
-    proc = subprocess.run(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        stdin=subprocess.DEVNULL,
-        encoding="utf-8",
-        errors="replace",
-        cwd="/root",
-        env=env,
-    )
-    return proc.returncode, proc.stdout or ""
+    out_path = os.path.join(SPOOL, "cmd-%s-%s.out" % (os.getpid(), int(time.time() * 1000)))
+    handle = open(out_path, "wb")
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=handle,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            cwd="/root",
+            env=env,
+            start_new_session=True,
+        )
+        while True:
+            code = proc.poll()
+            if code is not None:
+                break
+            if abort_batch is not None and _batch_id_stopped(abort_batch):
+                try:
+                    os.killpg(proc.pid, signal.SIGTERM)
+                except OSError:
+                    proc.terminate()
+                deadline = time.time() + 20
+                while proc.poll() is None and time.time() < deadline:
+                    time.sleep(0.5)
+                if proc.poll() is None:
+                    try:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except OSError:
+                        proc.kill()
+                    proc.wait()
+                handle.close()
+                text = _read_cmd_out(out_path)
+                return 75, text
+            time.sleep(2)
+        handle.close()
+        return proc.returncode, _read_cmd_out(out_path)
+    except Exception:
+        handle.close()
+        try:
+            os.remove(out_path)
+        except OSError:
+            pass
+        raise
+
+
+def _read_cmd_out(path):
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            return handle.read()
+    except OSError:
+        return ""
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 def _destination_extra(payload, current):
@@ -2598,7 +2673,6 @@ def _has_bad_chars(value):
     return any(ord(char) < 32 for char in str(value))
 
 
-_announced_stop = set()
 _probe_quiet_until = {}
 
 
@@ -2652,11 +2726,74 @@ def _batch_stopped(conn, batch_id):
     return bool(row and row["stop_requested"])
 
 
-def _note_stop(batch_id):
-    if batch_id in _announced_stop:
+def _batch_id_stopped(batch_id):
+    if not batch_id:
+        return False
+    conn = connect()
+    try:
+        return _batch_stopped(conn, batch_id)
+    finally:
+        conn.close()
+
+
+def _drop_spool_path(path):
+    if not path:
         return
-    _announced_stop.add(batch_id)
-    log_line("durdurma: mevcut hesap bitti, kuyruk bekliyor batch=%s" % batch_id)
+    _remove_file(path)
+    workdir = os.path.dirname(path)
+    if os.path.basename(workdir).startswith("run-") or os.path.basename(workdir).startswith("restore-"):
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+def _cancel_waiting(conn, batch_id):
+    rows = conn.execute(
+        """SELECT id, local_path FROM runs
+           WHERE batch_id=? AND status IN ('queued','packaged')""",
+        (batch_id,),
+    ).fetchall()
+    stamp = now_text()
+    for row in rows:
+        _drop_spool_path(row["local_path"])
+        _append_log(conn, row["id"], "Durduruldu. Kuyruk kapatıldı.")
+        conn.execute(
+            """UPDATE runs
+               SET status='cancelled', stage=NULL, local_path=NULL, finished_at=?, error=?
+               WHERE id=?""",
+            (stamp, "Çalıştırma durduruldu.", row["id"]),
+        )
+    return len(rows)
+
+
+def _cancel_active(run_id, note="Çalıştırma durduruldu."):
+    conn = connect()
+    try:
+        row = conn.execute("SELECT local_path FROM runs WHERE id=?", (run_id,)).fetchone()
+        if row is not None:
+            _drop_spool_path(row["local_path"])
+        _append_log(conn, run_id, note)
+        conn.execute(
+            """UPDATE runs
+               SET status='cancelled', stage=NULL, local_path=NULL, finished_at=?, error=?
+               WHERE id=?""",
+            (now_text(), note, run_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _close_stopped_queues():
+    conn = connect()
+    try:
+        batches = conn.execute("SELECT id FROM batches WHERE stop_requested=1").fetchall()
+        total = 0
+        for batch in batches:
+            total += _cancel_waiting(conn, batch["id"])
+        if total:
+            conn.commit()
+            log_line("durdurulmuş kuyruk kapatıldı n=%s" % total)
+    finally:
+        conn.close()
 
 
 def _set_stage(run_id, stage):
@@ -2723,7 +2860,8 @@ def _send_summaries():
                 """SELECT
                        SUM(CASE WHEN status='uploaded' THEN 1 ELSE 0 END) AS uploaded,
                        SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed,
-                       SUM(CASE WHEN status='skipped' THEN 1 ELSE 0 END) AS skipped
+                       SUM(CASE WHEN status='skipped' THEN 1 ELSE 0 END) AS skipped,
+                       SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END) AS cancelled
                    FROM runs WHERE batch_id=?""",
                 (batch["id"],),
             ).fetchone()
@@ -2736,12 +2874,13 @@ def _send_summaries():
     for batch, counts in pending:
         _notify(
             "cPBackup bitti: %s" % batch["title"],
-            "%s\nBaşarılı: %s\nHata: %s\nAtlanan: %s\n"
+            "%s\nBaşarılı: %s\nHata: %s\nAtlanan: %s\nDurdurulan: %s\n"
             % (
                 batch["title"],
                 int(counts["uploaded"] or 0),
                 int(counts["failed"] or 0),
                 int(counts["skipped"] or 0),
+                int(counts["cancelled"] or 0),
             ),
         )
 

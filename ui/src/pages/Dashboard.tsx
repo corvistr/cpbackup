@@ -123,6 +123,7 @@ function Overview({ status }: { status: PanelStatus }) {
         { label: "yüklendi", count: batch.uploaded, color: "bg-emerald-500" },
         { label: "hata", count: batch.failed, color: "bg-red-500" },
         { label: "atlandı", count: batch.skipped, color: "bg-slate-400" },
+        { label: "durduruldu", count: batch.cancelled, color: "bg-orange-400" },
         { label: "çalışan", count: batch.running, color: "bg-teal-500" },
         { label: "sırada", count: batch.queued, color: "bg-amber-300" },
         { label: "geri yüklendi", count: batch.restored, color: "bg-sky-500" },
@@ -213,6 +214,7 @@ export function BatchCounts({ batch }: { batch: BatchSummary }) {
       <Badge variant="success">{success} başarılı</Badge>
       {batch.failed ? <Badge variant="destructive">{batch.failed} hata</Badge> : null}
       {waiting ? <Badge variant="secondary">{waiting} sırada</Badge> : null}
+      {batch.cancelled ? <Badge variant="outline">{batch.cancelled} durduruldu</Badge> : null}
       {batch.skipped ? <Badge variant="outline">{batch.skipped} atlandı</Badge> : null}
     </div>
   )

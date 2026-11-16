@@ -2,6 +2,20 @@
 
 Bu dosya [Keep a Changelog](https://keepachangelog.com/tr/1.1.0/) biçimindedir. Sürüm numaraları [Semantic Versioning](https://semver.org/lang/tr/) kurallarına uyar.
 
+## 1.1.3 - 2026-11-16
+
+### Fixed
+
+- Durdurulan çalıştırmadaki bekleyen hesaplar kuyrukta kalıp sonraki yedekleri kilitlemiyor.
+- Durdur artık o turu tamamen kapatır. Bekleyen ve yüklenmeyi bekleyen hesaplar Durduruldu olur. Sürdür yok.
+- Worker, durdurulmuş turdaki kaydı görünce döngüyü bırakmaz; sıradaki açık yedeğe geçer.
+- Zamanlanmış tur, durdurulmuş çalıştırmadaki kuyruk kaydını “zaten var” saymaz.
+- Paketleme sürerken Durdur, `pkgacct` / `restorepkg` sürecini keser. Yüklemesi başlamış hesap bitene kadar sürer.
+
+### Changed
+
+- Geçmiş ekranında Durdur metni güncellendi. Özet ve rozetlere “Durduruldu” eklendi.
+
 ## 1.1.2 - 2026-11-12
 
 ### Fixed
